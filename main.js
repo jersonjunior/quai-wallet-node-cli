@@ -4,31 +4,31 @@ const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// --- LÓGICA DE INICIALIZAÇÃO CORRIGIDA ---
+// --- CORRECTED INITIALIZATION LOGIC ---
 
-// Define o caminho para a pasta de dados e para o .env
+// Define the path to the data folder and the .env file
 const dataDir = path.join(process.cwd(), 'data');
 const envPath = path.join(dataDir, '.env');
 
-// Garante que o diretório de dados exista no host (para o volume funcionar)
+// Ensures the data directory exists on the host (for the volume to work)
 if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir);
 }
 
-// Carrega o .env IMEDIATAMENTE se ele já existir.
-// Especificamos o caminho para garantir que ele leia do lugar certo.
+// Load the .env IMMEDIATELY if it already exists.
+// We specify the path to ensure it reads from the correct location.
 if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
 }
 
-// AGORA que o .env (se existir) já foi carregado, NÓS IMPORTAMOS os outros módulos.
-// Isso garante que eles já "nasçam" com as variáveis de ambiente corretas.
+// NOW that the .env (if it exists) has been loaded, WE REQUIRE the other modules.
+// This ensures they are initialized with the correct environment variables.
 const setup = require('./setup');
 const wallet = require('./wallet');
 const readline = require('readline');
 
 
-// --- Funções de UI ---
+// --- UI Functions ---
 function clearScreen() { console.clear(); }
 
 async function pressEnterToContinue() {
@@ -41,7 +41,7 @@ async function pressEnterToContinue() {
     });
 }
 
-// --- Menu Principal Completo ---
+// --- Main Menu ---
 async function showMainMenu() {
     while (true) {
         clearScreen();
@@ -92,17 +92,17 @@ async function showMainMenu() {
 }
 
 
-// --- Função de Inicialização Completa ---
+// --- Application Start Logic ---
 async function start() {
-    // A verificação do .env já foi feita no topo do arquivo.
+    // The .env check was already performed at the top of the file.
     if (!fs.existsSync(envPath)) {
         clearScreen();
         console.log("Welcome! It looks like this is your first time running the wallet.");
         console.log("Let's begin with the secure setup.");
         try {
-            await setup.runSetup(); // Cria o arquivo .env dentro da pasta /data
+            await setup.runSetup(); // Creates the .env file inside the /data folder
 
-            // Recarrega o ambiente para que a sessão atual conheça as novas variáveis
+            // Reload the environment so the current session is aware of the new variables
             const newEnv = dotenv.parse(fs.readFileSync(envPath));
             for (const key in newEnv) {
                 process.env[key] = newEnv[key];
@@ -114,10 +114,10 @@ async function start() {
             console.error("\nAn error occurred during setup:", error.message);
         }
     } else {
-        // Se o arquivo já existia, as variáveis já foram carregadas. Vai direto ao menu.
+        // If the file already existed, the variables have been loaded. Go straight to the menu.
         await showMainMenu();
     }
 }
 
-// Inicia a aplicação
+// Start the application
 start();
