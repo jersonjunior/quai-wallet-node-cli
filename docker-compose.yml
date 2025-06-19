@@ -1,0 +1,12 @@
+# docker-compose.yml (Corrigido)
+
+services:
+  quai-wallet:
+    build: .
+    image: quai-wallet-app
+    stdin_open: true # Mantém o canal de entrada aberto para interação (-i)
+    tty: true      # Aloca um terminal para a interface de linha de comando (-t)
+    volumes:
+      # CORREÇÃO: Mapeia a pasta local 'wallet-data' para uma subpasta '/data' dentro do contêiner.
+      # Isso preserva o código da aplicação em /usr/src/app e só persiste os dados.
+      - ./wallet-data:/usr/src/app/data
