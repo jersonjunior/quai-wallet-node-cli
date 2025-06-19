@@ -1,0 +1,12 @@
+# Ignore the Node.js modules folder, as it will be installed inside the container
+node_modules
+
+# Ignore the .env file, as it will be managed by a volume
+.env
+
+# Ignore npm log files
+npm-debug.log
+
+# Ignore the Dockerfile itself
+Dockerfile
+.dockerignore
