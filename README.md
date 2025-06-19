@@ -81,7 +81,6 @@ The application provides an interactive menu with the following options:
 ---
 
 ## Remove wallet
-    ```bash
     rm -rf wallet-data or r; wallet-data/.env
 
 ## Disclaimer
