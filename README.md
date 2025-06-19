@@ -83,6 +83,9 @@ The application provides an interactive menu with the following options:
 ## Remove wallet
     rm -rf wallet-data or rm wallet-data/.env
 
+## Donations
+QUAI: 0x003d09d08Fd59241EB1C9EA4F450A1dD11a0adf1
+
 ## Disclaimer
 
 ⚠️ **This is a personal project created for educational and experimental purposes. It has not been professionally audited.**
