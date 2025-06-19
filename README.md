@@ -79,10 +79,10 @@ The application provides an interactive menu with the following options:
 6.  **Exit**: Securely closes the application.
 
 ---
+
 ## Remove wallet
     ```bash
     rm -rf wallet-data or r; wallet-data/.env
-    ```
 
 ## Disclaimer
 
