@@ -59,8 +59,8 @@ async function showMainMenu() {
 
         console.log("\n--- Main Wallet Menu ---");
         console.log("1. Check Balance");
-        console.log("2. Send (FROM Derived Wallet with BIP-39 Passphrase)");
-        console.log("3. Send (TO Derived Wallet with BIP-39 Passphrase)");
+        console.log("2. Send (Wallet with Passphrase)");
+        console.log("3. Send (Normal Wallet)");
         console.log("4. List Received Transactions");
         console.log("5. Lock Wallet (Forget Password)");
         console.log("6. Exit");
