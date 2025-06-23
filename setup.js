@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const quais = require('quais');
 
-// Função para fazer perguntas no terminal (versão final e estável)
+// Função para fazer perguntas no terminal
 async function askQuestion(query, options = {}) {
     const { hidden = false } = options;
     return new Promise(resolve => {
@@ -43,14 +43,14 @@ async function askQuestion(query, options = {}) {
     });
 }
 
-// Função principal do setup, completa com todos os passos e logo
+// Função principal do setup
 async function runSetup() {
-    console.log("--- Initial Wallet Setup ---");
     let seedPhrase = '';
 
     // Obter seed phrase do usuário
     let choice = '';
     while (choice !== '1' && choice !== '2') {
+        clearScreen();
         const coloredAsciiLogo = `\x1b[31m
               ████████
           ██████    ██████
@@ -65,6 +65,7 @@ async function runSetup() {
 
         console.log(coloredAsciiLogo);
         console.log("\n             QUAI NETWORK");
+        console.log("\n--- Initial Wallet Setup ---");
 
         console.log("\nHow would you like to enter your seed phrase?");
         console.log("1. Paste the full phrase.");
@@ -124,8 +125,10 @@ async function runSetup() {
     encryptedSeed += cipher.final('hex');
     console.log("\n✅ Wallet encrypted!");
 
-    // Caminho correto para salvar o .env na pasta /data
     const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir);
+    }
     const envPath = path.join(dataDir, '.env');
 
     const envContent = [
@@ -140,5 +143,7 @@ async function runSetup() {
     fs.writeFileSync(envPath, envContent);
     console.log(`✅ Wallet securely saved to: ${envPath}`);
 }
+
+function clearScreen() { console.clear(); }
 
 module.exports = { runSetup };
