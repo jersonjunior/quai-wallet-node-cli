@@ -61,6 +61,22 @@ async function checkBalance() {
         ]);
         const balanceMainQuai = quais.formatUnits(balanceMainWei, 18);
         const balanceDerivedQuai = quais.formatUnits(balanceDerivedWei, 18);
+
+        const coloredAsciiLogo = `\x1b[31m
+              ████████
+          ██████    ██████
+        ████          ██████
+      ████              ████
+     ████                ████
+     ████                ████
+      ████              ████
+       ████          ████████
+         ██████    ██████  ██
+              ████████      ██\x1b[0m`;
+
+        console.log(coloredAsciiLogo);
+        console.log("\n             QUAI NETWORK");
+        console.log("\n--- Initial Wallet Setup ---");
         console.log("\n======================================");
         console.log("              BALANCE SUMMARY             ");
         console.log("======================================");
