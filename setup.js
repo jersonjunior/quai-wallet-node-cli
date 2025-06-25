@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const quais = require('quais');
 
-// Função para fazer perguntas no terminal
+// Função para fazer perguntas no terminal (sem alterações)
 async function askQuestion(query, options = {}) {
     const { hidden = false } = options;
     return new Promise(resolve => {
@@ -47,11 +47,9 @@ async function askQuestion(query, options = {}) {
 async function runSetup() {
     let seedPhrase = '';
 
-    // Obter seed phrase do usuário
-    let choice = '';
-    while (choice !== '1' && choice !== '2') {
-        clearScreen();
-        const coloredAsciiLogo = `\x1b[31m
+    // --- NOVO MENU INICIAL: CRIAR OU RESTAURAR ---
+    clearScreen();
+    const coloredAsciiLogo = `\x1b[31m
               ████████
           ██████    ██████
         ████          ██████
@@ -63,43 +61,92 @@ async function runSetup() {
          ██████    ██████  ██
               ████████      ██\x1b[0m`;
 
-        console.log(coloredAsciiLogo);
-        console.log("\n             QUAI NETWORK");
-        console.log("\n--- Initial Wallet Setup ---");
+    console.log(coloredAsciiLogo);
+    console.log("\n             QUAI NETWORK");
+    console.log("\n--- Initial Wallet Setup ---");
 
-        console.log("\nHow would you like to enter your seed phrase?");
-        console.log("1. Paste the full phrase.");
-        console.log("2. Type word by word.");
-        choice = await askQuestion('Enter your choice (1 or 2): ');
+    console.log("\nWelcome! Would you like to create a new wallet or restore an existing one?");
+    console.log("1. Create a new wallet.");
+    console.log("2. Restore from an existing seed phrase.");
+    
+    let initialChoice = '';
+    while (initialChoice !== '1' && initialChoice !== '2') {
+        initialChoice = await askQuestion('Enter your choice (1 or 2): ');
     }
-    if (choice === '1') {
-        seedPhrase = await askQuestion('Paste your seed phrase and press Enter: ', { hidden: true });
-    } else {
+
+    // --- LÓGICA DE CRIAÇÃO DE CARTEIRA (NOVO) ---
+    if (initialChoice === '1') {
+        clearScreen();
+        console.log("\n--- Create New Wallet ---");
         let wordCount = 0;
         while (wordCount !== 12 && wordCount !== 24) {
-            const countStr = await askQuestion('Does your seed phrase have 12 or 24 words? ');
+            const countStr = await askQuestion('Do you want a 12 or 24-word seed phrase? ');
             wordCount = parseInt(countStr, 10);
         }
-        const words = [];
-        console.log(`\nPlease enter your ${wordCount} words.`);
-        for (let i = 0; i < wordCount; i++) {
-            const word = await askQuestion(`Word ${i + 1}: `, { hidden: true });
-            words.push(word.trim());
+
+        console.log("\nGenerating your new seed phrase, please wait...");
+        const entropyBytes = wordCount === 12 ? 16 : 32; // 12 words = 128 bits = 16 bytes; 24 words = 256 bits = 32 bytes
+        const entropy = crypto.randomBytes(entropyBytes);
+        const mnemonic = quais.Mnemonic.fromEntropy(entropy);
+        seedPhrase = mnemonic.phrase;
+
+        clearScreen();
+        console.log("\x1b[31m\n!!! IMPORTANT - WRITE THIS DOWN !!!\x1b[0m");
+        console.log("This is your new seed phrase. It is the ONLY way to recover your wallet.");
+        console.log("Store it securely offline. Do not share it with anyone.");
+        console.log("\n====================================================================");
+        console.log(`   ${seedPhrase}`);
+        console.log("====================================================================");
+        await askQuestion('\nPress Enter after you have securely written down your seed phrase. ');
+        clearScreen();
+    } 
+    // --- LÓGICA DE RESTAURAÇÃO DE CARTEIRA (LÓGICA ANTIGA MOVIDA PARA CÁ) ---
+    else {
+        let choice = '';
+        while (choice !== '1' && choice !== '2') {
+            clearScreen();
+            console.log("\n--- Restore Existing Wallet ---");
+            console.log("\nHow would you like to enter your seed phrase?");
+            console.log("1. Paste the full phrase.");
+            console.log("2. Type word by word.");
+            choice = await askQuestion('Enter your choice (1 or 2): ');
         }
-        seedPhrase = words.join(' ');
+        if (choice === '1') {
+            seedPhrase = await askQuestion('Paste your seed phrase and press Enter: ', { hidden: true });
+        } else {
+            let wordCount = 0;
+            while (wordCount !== 12 && wordCount !== 24) {
+                const countStr = await askQuestion('Does your seed phrase have 12 or 24 words? ');
+                wordCount = parseInt(countStr, 10);
+            }
+            const words = [];
+            console.log(`\nPlease enter your ${wordCount} words.`);
+            for (let i = 0; i < wordCount; i++) {
+                const word = await askQuestion(`Word ${i + 1}: `, { hidden: true });
+                words.push(word.trim());
+            }
+            seedPhrase = words.join(' ');
+        }
     }
 
     if (!seedPhrase || seedPhrase.split(' ').length < 11) {
         throw new Error("Seed phrase appears to be incomplete or empty. Aborting.");
     }
-    console.log("Seed phrase received.");
+    console.log("Seed phrase received and ready.");
+
+    // --- FLUXO COMUM (A PARTIR DAQUI, NADA MUDA) ---
 
     // Derivar e salvar os endereços públicos
     console.log("\nNow, let's set up your derived wallet (with BIP-39 passphrase).");
-    const bip39Passphrase = await askQuestion('Enter the BIP-39 passphrase you want to associate with this wallet: ', { hidden: true });
+    const bip39Passphrase = await askQuestion('Enter the BIP-39 passphrase you want to associate with this wallet (optional, but recommended): ', { hidden: true });
+    
+    // NOTA: A lógica original lançava um erro se a passphrase estivesse vazia. 
+    // Alterei para permitir que seja opcional, o que é mais comum. Se quiser forçar, descomente as linhas abaixo.
+    /*
     if (!bip39Passphrase) {
         throw new Error("The BIP-39 passphrase cannot be empty for setup.");
     }
+    */
 
     const mainMnemonic = quais.Mnemonic.fromPhrase(seedPhrase);
     const mainWallet = quais.QuaiHDWallet.fromMnemonic(mainMnemonic);
@@ -111,7 +158,7 @@ async function runSetup() {
 
     console.log("\nConfigured Addresses:");
     console.log(`- Main Address: ${mainAddress}`);
-    console.log(`- Derived Address: ${derivedAddress}`);
+    console.log(`- Derived Address (with passphrase): ${derivedAddress}`);
 
     // Criptografar a seed phrase
     const password = await askQuestion('\nCreate a strong password to encrypt your wallet: ', { hidden: true });
