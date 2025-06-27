@@ -1,59 +1,58 @@
 // wallet.js
 
 const quais = require('quais');
-const prompt = require('prompt');
 const crypto = require('crypto');
 const axios = require('axios');
 
 const QUAI_EXPLORER_API_URL = 'https://quaiscan.io/api';
 let walletCache = { decryptedPhrase: null, bip39Passphrase: null };
 
-// --- FUNÇÕES AUXILIARES E DE CONSULTA (sem alterações) ---
-
-function lockWallet() {
+function lockWallet({ chalk, strings }) {
     walletCache = { decryptedPhrase: null, bip39Passphrase: null };
-    console.log("\nWallet locked. Password will be required for the next operation.");
+    console.log(chalk.yellow.bold(`\n${strings.walletLocked}`));
 }
 
-async function getDecryptedSeedPhrase() {
+async function getDecryptedSeedPhrase({ inquirer, chalk, ora, strings }) {
     if (walletCache.decryptedPhrase) return walletCache.decryptedPhrase;
-    console.log("Your wallet is locked.");
-    prompt.start();
-    const { decryptionPassword } = await prompt.get({ properties: { decryptionPassword: { description: 'Enter wallet password to unlock', hidden: true, replace: '*', required: true } } });
+    console.log(chalk.yellow(strings.walletIsLocked));
+    const { decryptionPassword } = await inquirer.prompt([{ type: 'password', name: 'decryptionPassword', message: strings.unlockPrompt }]);
+    
+    const spinner = ora(strings.decryptingWallet).start();
     const { ENCRYPTED_SEED_PHRASE, SALT, IV } = process.env;
     const key = crypto.pbkdf2Sync(decryptionPassword, Buffer.from(SALT, 'hex'), 200000, 32, 'sha512');
     const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(IV, 'hex'));
+    
     try {
         let decryptedSeed = decipher.update(ENCRYPTED_SEED_PHRASE, 'hex', 'utf8');
         decryptedSeed += decipher.final('utf8');
         walletCache.decryptedPhrase = decryptedSeed;
-        console.log("✅ Wallet decrypted successfully.");
+        spinner.succeed(chalk.green(strings.decryptionSuccess));
         return decryptedSeed;
     } catch (e) {
-        throw new Error("Incorrect password or corrupt .env file.");
+        spinner.fail(chalk.red(strings.decryptionFailed));
+        throw new Error(strings.incorrectPassword);
     }
 }
 
-async function getBip39Passphrase() {
+async function getBip39Passphrase({ inquirer, chalk, strings }) {
     if (walletCache.bip39Passphrase !== null) {
-        console.log("Using BIP-39 passphrase from current session.");
+        console.log(chalk.blue(strings.usingBip39FromSession));
         return walletCache.bip39Passphrase;
     }
-    console.log("\n(Optional) If the operation involves the derived wallet, enter its BIP-39 passphrase.");
-    prompt.start();
-    const { bip39 } = await prompt.get({ properties: { bip39: { description: 'BIP-39 Passphrase (press Enter for none)', hidden: true, replace: '*' } } });
+    const { bip39 } = await inquirer.prompt([{ type: 'password', name: 'bip39', message: strings.enterBip39 }]);
     walletCache.bip39Passphrase = bip39 || '';
     return walletCache.bip39Passphrase;
 }
 
-async function checkBalance() {
+async function checkBalance({ ora, chalk, boxen, strings }) {
+    const spinner = ora(strings.fetchingBalances).start();
     try {
         const mainAddress = process.env.MAIN_ADDRESS;
         const derivedAddress = process.env.DERIVED_ADDRESS;
         if (!mainAddress || !derivedAddress) {
             throw new Error("Addresses not found in .env file. Please re-run setup.");
         }
-        console.log("\nFetching balances... Connecting to Quai Network...");
+
         const provider = new quais.JsonRpcProvider('https://rpc.quai.network');
         const [balanceMainWei, balanceDerivedWei] = await Promise.all([
             provider.getBalance(mainAddress),
@@ -61,88 +60,137 @@ async function checkBalance() {
         ]);
         const balanceMainQuai = quais.formatUnits(balanceMainWei, 18);
         const balanceDerivedQuai = quais.formatUnits(balanceDerivedWei, 18);
+        spinner.succeed(strings.balancesFetched);
 
-        const coloredAsciiLogo = `\x1b[31m
-              ████████
-          ██████    ██████
-        ████          ██████
-      ████              ████
-     ████                ████
-     ████                ████
-      ████              ████
-       ████          ████████
-         ██████    ██████  ██
-              ████████      ██\x1b[0m`;
+        const balanceBox = boxen(
+            `${chalk.bold(strings.mainWallet)}\n  ${chalk.dim(strings.address)} ${mainAddress}\n  ${chalk.dim(strings.balance)} ${chalk.green(balanceMainQuai + ' QUAI')}\n\n` +
+            `${chalk.bold(strings.derivedWalletWithBip39)}\n  ${chalk.dim(strings.address)} ${derivedAddress}\n  ${chalk.dim(strings.balance)} ${chalk.green(balanceDerivedQuai + ' QUAI')}`,
+            {
+                title: strings.balanceSummary,
+                padding: 1,
+                margin: 1,
+                borderStyle: 'round',
+                borderColor: 'cyan'
+            }
+        );
+        console.log(balanceBox);
 
-        console.log(coloredAsciiLogo);
-        console.log("\n             QUAI NETWORK");
-        console.log("\n--- Initial Wallet Setup ---");
-        console.log("\n======================================");
-        console.log("              BALANCE SUMMARY             ");
-        console.log("======================================");
-        console.log(`Main Wallet`);
-        console.log(`  Address: ${mainAddress}`);
-        console.log(`  Balance: ${balanceMainQuai} QUAI`);
-        console.log("--------------------------------------");
-        console.log(`Derived Wallet (with BIP-39 passphrase)`);
-        console.log(`  Address: ${derivedAddress}`);
-        console.log(`  Balance: ${balanceDerivedQuai} QUAI`);
-        console.log("======================================");
     } catch (error) {
-        if (error.message !== 'canceled') {
-            console.error("\nAn error occurred while checking balance:", error.message);
-        }
+        spinner.fail(chalk.red(strings.failedToFetchBalances));
+        console.error(chalk.red(`\n${strings.errorCheckingBalance}`), error.message);
     }
 }
 
-async function listTransactions() {
+async function listTransactions(modules, transactionType) {
+    const { inquirer, ora, chalk, boxen, strings } = modules;
+    let spinner; 
     try {
         const mainAddress = process.env.MAIN_ADDRESS;
         const derivedAddress = process.env.DERIVED_ADDRESS;
-        if (!mainAddress || !derivedAddress) { throw new Error("Addresses not found in .env file. Please re-run setup."); }
-        console.log("\nWhich address's received transactions do you want to see?");
-        console.log(`1. Main Wallet (${mainAddress})`);
-        console.log(`2. Derived Wallet (${derivedAddress})`);
-        prompt.start();
-        const { choice } = await prompt.get({ properties: { choice: { description: 'Select an option (1 or 2)', pattern: /^[12]$/, required: true } } });
+        if (!mainAddress || !derivedAddress) { throw new Error("Addresses not found in .env file."); }
+
+        const { choice } = await inquirer.prompt([{
+            type: 'list',
+            name: 'choice',
+            message: strings.whichAddress,
+            choices: [
+                { name: `${strings.mainWallet} (${mainAddress})`, value: '1' },
+                // CORREÇÃO 1: Usando a chave correta 'derivedWalletWithBip39'
+                { name: `${strings.derivedWalletWithBip39} (${derivedAddress})`, value: '2' },
+            ],
+            loop: false
+        }]);
+
         const targetAddress = (choice === '1') ? mainAddress : derivedAddress;
-        const walletName = (choice === '1') ? "Main" : "Derived";
-        console.log(`\nFetching transactions for the ${walletName} wallet: ${targetAddress}`);
-        console.log("Please wait...");
+        // CORREÇÃO 2: Usando a chave correta aqui também
+        const walletName = (choice === '1') ? strings.mainWallet : strings.derivedWalletWithBip39;
+        const lowerCaseTargetAddress = targetAddress.toLowerCase();
+
+        spinner = ora(strings.fetchingTransactions.replace('{walletName}', walletName)).start();
         const apiUrl = `${QUAI_EXPLORER_API_URL}?module=account&action=txlist&address=${targetAddress}&startblock=0&endblock=99999999&sort=asc`;
         const response = await axios.get(apiUrl);
-        if (response.data.status !== '1') { throw new Error(`Could not fetch history. API Message: ${response.data.message} | ${response.data.result}`); }
-        const allTransactions = response.data.result;
-        const receivedTransactions = allTransactions.filter(tx => tx.to.toLowerCase() === targetAddress.toLowerCase());
-        console.log("\n--- Received Transaction History ---");
-        if (receivedTransactions.length === 0) { console.log("No received transactions found for this address."); } else {
-            receivedTransactions.forEach(tx => {
-                const amount = quais.formatUnits(tx.value, 18);
-                const date = new Date(tx.timeStamp * 1000).toLocaleString('en-US');
-                console.log("-----------------------------------------");
-                console.log(`   Date: ${date}`);
-                console.log(`   From: ${tx.from}`);
-                console.log(` Amount: +${amount} QUAI`);
-                console.log(`   Hash: ${tx.hash}`);
-            });
-            console.log("-----------------------------------------");
+
+        if (response.data.status === '0' && response.data.message.includes('No transactions found')) {
+            spinner.succeed(chalk.yellow(strings.noTransactionsFound));
+            return;
         }
+
+        if (response.data.status !== '1') {
+            throw new Error(`${strings.apiError} ${response.data.message} | ${response.data.result}`);
+        }
+        
+        spinner.succeed(strings.historyFetched);
+        const allTransactions = response.data.result;
+        
+        let filteredTransactions;
+        let title;
+
+        if (transactionType === 'received') {
+            title = strings.receivedHistory;
+            filteredTransactions = allTransactions.filter(tx => tx.to.toLowerCase() === lowerCaseTargetAddress);
+        } else { // transactionType === 'sent'
+            title = strings.sentHistory;
+            filteredTransactions = allTransactions.filter(tx => tx.from.toLowerCase() === lowerCaseTargetAddress);
+        }
+        
+        console.log(chalk.bold.cyan(`\n${title}`));
+
+        if (filteredTransactions.length === 0) {
+            const typeString = transactionType === 'received' ? strings.typeReceived : strings.typeSent;
+            console.log(chalk.yellow(strings.noTransactionsOfType.replace('{type}', typeString)));
+        } else {
+            filteredTransactions.forEach(tx => {
+                const value = quais.formatUnits(tx.value, 18);
+                const date = new Date(tx.timeStamp * 1000).toLocaleString(strings.goodbye === 'Até mais!' ? 'pt-BR' : 'en-US');
+                
+                let amountDisplay;
+                let fromToDisplay;
+
+                if (transactionType === 'received') {
+                    amountDisplay = chalk.green(`+ ${value} QUAI`);
+                    fromToDisplay = `${chalk.bold(strings.from)} ${tx.from}`;
+                } else {
+                    amountDisplay = chalk.red(`- ${value} QUAI`);
+                    fromToDisplay = `${chalk.bold(strings.to)} ${tx.to}`;
+                }
+
+                const txBox = boxen(
+                    `${chalk.bold(strings.date)} ${date}\n` +
+                    `${fromToDisplay}\n` +
+                    `${chalk.bold(strings.value)} ${amountDisplay}`,
+                    { 
+                        padding: 1, 
+                        margin: { top: 1 }, 
+                        borderStyle: 'round',
+                        title: `${strings.hash} ${tx.hash}`
+                    }
+                );
+                console.log(txBox);
+            });
+        }
+
     } catch (error) {
-        if (error.response && error.response.status === 502) { console.error("\nCould not communicate with the QuaiScan server (Error 502). Please try again later."); } else if (error.message !== 'canceled') { console.error("\nAn error occurred while listing transactions:", error.message); }
+        if (spinner) {
+            spinner.fail(chalk.red(strings.failedToFetchTx));
+        }
+
+        if (error.response && error.response.status === 502) {
+            console.error(chalk.red(`\n${strings.quaiscanError}`));
+        } else {
+            console.error(chalk.red(`\n${strings.errorListingTx}`), error.message);
+        }
     }
 }
 
-
-// --- FUNÇÕES DE ENVIO CORRIGIDAS ---
-
-async function sendFromDerivedWallet() {
+async function sendFromDerivedWallet(modules) {
+    const { inquirer, chalk, ora, strings } = modules;
     try {
-        const phrase = await getDecryptedSeedPhrase();
+        const phrase = await getDecryptedSeedPhrase(modules);
         if (!phrase) return;
 
-        const bip39Passphrase = await getBip39Passphrase();
+        const bip39Passphrase = await getBip39Passphrase(modules);
         if (!bip39Passphrase) {
-            console.log("\n❌ ERROR: To send from the derived wallet, the BIP-39 passphrase is required.");
+            console.log(chalk.red.bold(`\n${strings.bip39Required}`));
             return;
         }
 
@@ -152,93 +200,82 @@ async function sendFromDerivedWallet() {
         await senderWallet.connect(provider);
 
         const senderAddressInfo = await senderWallet.getNextAddress(0, quais.Zone.Cyprus1);
-        const senderAddress = senderAddressInfo.address; // Temos o endereço de origem aqui
+        const senderAddress = senderAddressInfo.address;
         const senderBalance = await provider.getBalance(senderAddress);
         const senderBalanceQuai = quais.formatUnits(senderBalance, 18);
 
-        console.log(`\nYour Source Wallet (Derived with Passphrase):`);
-        console.log(`  Address: ${senderAddress}`);
-        console.log(`  Balance: ${senderBalanceQuai} QUAI`);
-        if (senderBalance === 0n) { console.log("Insufficient balance to send."); return; }
-        
-        prompt.start();
-        const { toAddress, amount } = await prompt.get({ properties: { toAddress: { description: 'Enter destination address', required: true }, amount: { description: `Enter amount to send (max ${senderBalanceQuai})`, pattern: /^[0-9]+([.,][0-9]+)?$/, required: true } } });
-        if (!quais.isAddress(toAddress)) throw new Error("Invalid destination address.");
+        console.log(chalk.yellow(`\n${strings.sourceWalletDerived}`));
+        console.log(`  ${strings.address} ${senderAddress}`);
+        console.log(`  ${strings.balance} ${senderBalanceQuai} QUAI`);
+        if (senderBalance === 0n) { console.log(chalk.red(strings.insufficientBalance)); return; }
+
+        const { toAddress, amount } = await inquirer.prompt([
+            { type: 'input', name: 'toAddress', message: strings.enterDestination, validate: (input) => quais.isAddress(input) ? true : strings.invalidAddress },
+            { type: 'input', name: 'amount', message: strings.enterAmount.replace('{maxAmount}', senderBalanceQuai), validate: (input) => !isNaN(parseFloat(input.replace(',', '.'))) ? true : strings.invalidNumber }
+        ]);
+
         const normalizedAmount = amount.replace(',', '.');
         const amountToSendWei = quais.parseQuai(normalizedAmount);
 
-        if (amountToSendWei > senderBalance) { throw new Error(`Insufficient balance. You only have ${senderBalanceQuai} QUAI.`); }
-        
-        const { confirm } = await prompt.get({properties: { confirm: { description: `Confirm sending ${normalizedAmount} QUAI to ${toAddress}? (y/n)`, pattern: /^[ynYN]$/, required: true } }});
-        if (confirm.toLowerCase() !== 'y') { console.log("Operation canceled."); return; }
-        
-        console.log("\nBroadcasting transaction to the network...");
-        // **CORREÇÃO: Adicionado o campo 'from' explicitamente**
-        const tx = await senderWallet.sendTransaction({ 
-            from: senderAddress, 
-            to: toAddress, 
-            value: amountToSendWei 
-        });
-        console.log(`\nTransaction sent! Hash: ${tx.hash}`);
-        console.log("Waiting for confirmation...");
+        if (amountToSendWei > senderBalance) { throw new Error(strings.insufficientBalanceError.replace('{balanceQuai}', senderBalanceQuai)); }
+
+        const { confirm } = await inquirer.prompt([{ type: 'confirm', name: 'confirm', message: strings.confirmSend.replace('{amount}', normalizedAmount).replace('{toAddress}', toAddress), default: false }]);
+        if (!confirm) { console.log(chalk.yellow(strings.opCancelled)); return; }
+
+        const spinner = ora(strings.broadcastingTx).start();
+        const tx = await senderWallet.sendTransaction({ from: senderAddress, to: toAddress, value: amountToSendWei });
+        spinner.text = strings.txSent.replace('{hash}', tx.hash);
         const receipt = await tx.wait();
-        console.log(`✅ Transaction confirmed in block #${receipt.blockNumber}!`);
+        spinner.succeed(chalk.green(strings.txConfirmed.replace('{blockNumber}', receipt.blockNumber)));
 
     } catch (error) {
-        if(error.message !== 'canceled') console.error("\n❌ Error:", error.message);
+        console.error(chalk.red(`\n${strings.error}:`), error.message);
     }
 }
 
-async function sendToDerivedWallet() {
+async function sendToDerivedWallet(modules) {
+    const { inquirer, chalk, ora, strings } = modules;
     try {
-        const phrase = await getDecryptedSeedPhrase();
+        const phrase = await getDecryptedSeedPhrase(modules);
         if (!phrase) return;
 
         const provider = new quais.JsonRpcProvider('https://rpc.quai.network', undefined, { usePathing: true });
         const senderMnemonic = quais.Mnemonic.fromPhrase(phrase);
         const senderWallet = quais.QuaiHDWallet.fromMnemonic(senderMnemonic);
         await senderWallet.connect(provider);
-        
+
         const senderAddressInfo = await senderWallet.getNextAddress(0, quais.Zone.Cyprus1);
-        const senderAddress = senderAddressInfo.address; // Temos o endereço de origem aqui
+        const senderAddress = senderAddressInfo.address;
         const senderBalance = await provider.getBalance(senderAddress);
         const senderBalanceQuai = quais.formatUnits(senderBalance, 18);
 
-        console.log(`\nYour Source Wallet (Main):`);
-        console.log(`  Address: ${senderAddress}`);
-        console.log(`  Balance: ${senderBalanceQuai} QUAI`);
-        if (senderBalance === 0n) { console.log("Insufficient balance to send."); return; }
+        console.log(chalk.yellow(`\n${strings.sourceWallet}`));
+        console.log(`  ${strings.address} ${senderAddress}`);
+        console.log(`  ${strings.balance} ${senderBalanceQuai} QUAI`);
+        if (senderBalance === 0n) { console.log(chalk.red(strings.insufficientBalance)); return; }
 
         const toAddress = process.env.DERIVED_ADDRESS;
         if (!toAddress) { throw new Error("Derived address not found in .env. Please run setup again."); }
-        console.log(`\nDestination address is your derived wallet: ${toAddress}`);
+        console.log(chalk.blue(`\n${strings.destinationIsDerived.replace('{toAddress}', toAddress)}`));
 
-        prompt.start();
-        const { amount } = await prompt.get({ properties: { amount: { description: `Enter amount to send (max ${senderBalanceQuai})`, pattern: /^[0-9]+([.,][0-9]+)?$/, required: true } } });
+        const { amount } = await inquirer.prompt([{ type: 'input', name: 'amount', message: strings.enterAmount.replace('{maxAmount}', senderBalanceQuai), validate: (input) => !isNaN(parseFloat(input.replace(',', '.'))) ? true : strings.invalidNumber }]);
+        
         const normalizedAmount = amount.replace(',', '.');
         const amountToSendWei = quais.parseQuai(normalizedAmount);
 
-        if (amountToSendWei > senderBalance) { throw new Error(`Insufficient balance. You only have ${senderBalanceQuai} QUAI.`); }
-        
-        const { confirm } = await prompt.get({ properties: { confirm: { description: `Confirm sending ${normalizedAmount} QUAI? (y/n)`, pattern: /^[ynYN]$/, required: true } } });
-        if (confirm.toLowerCase() !== 'y') { console.log("Operation canceled."); return; }
-        
-        console.log("\nBroadcasting transaction to the network...");
-        // **CORREÇÃO: Adicionado o campo 'from' explicitamente**
-        const tx = await senderWallet.sendTransaction({ 
-            from: senderAddress, 
-            to: toAddress, 
-            value: amountToSendWei 
-        });
-        console.log(`\nTransaction sent! Hash: ${tx.hash}`);
-        console.log("Waiting for confirmation...");
+        if (amountToSendWei > senderBalance) { throw new Error(strings.insufficientBalanceError.replace('{balanceQuai}', senderBalanceQuai)); }
+
+        const { confirm } = await inquirer.prompt([{ type: 'confirm', name: 'confirm', message: strings.confirmSendToDerived.replace('{amount}', normalizedAmount), default: false }]);
+        if (!confirm) { console.log(chalk.yellow(strings.opCancelled)); return; }
+
+        const spinner = ora(strings.broadcastingTx).start();
+        const tx = await senderWallet.sendTransaction({ from: senderAddress, to: toAddress, value: amountToSendWei });
+        spinner.text = strings.txSent.replace('{hash}', tx.hash);
         const receipt = await tx.wait();
-        console.log(`✅ Transaction confirmed in block #${receipt.blockNumber}!`);
+        spinner.succeed(chalk.green(strings.txConfirmed.replace('{blockNumber}', receipt.blockNumber)));
 
     } catch (error) {
-        if (error.message !== 'canceled') {
-            console.error("\n❌ An error occurred during send:", error.message);
-        }
+        console.error(chalk.red(`\n${strings.errorDuringSend}`), error.message);
     }
 }
 
